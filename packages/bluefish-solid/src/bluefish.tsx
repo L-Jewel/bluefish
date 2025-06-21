@@ -2580,13 +2580,15 @@ export function Bluefish(props: BluefishProps) {
         ).map((nrId) => scopeMap.getValue(nrId))
       );
     createEffect(() => {
-      for (const bubbleNode of previewNodeData()) {
-        if (previewNodeId() === bubbleNode.nodeId) {
-          highlightNode(bubbleNode.nodeId);
-        } else if (relatedNodesToHighlight().has(bubbleNode.nodeId)) {
-          highlightNode(bubbleNode.nodeId, "rgba(0, 0, 255, 0.8");
-        } else {
-          hideNode(bubbleNode.nodeId);
+      if (showHighlighting()) {
+        for (const bubbleNode of previewNodeData()) {
+          if (previewNodeId() === bubbleNode.nodeId) {
+            highlightNode(bubbleNode.nodeId);
+          } else if (relatedNodesToHighlight().has(bubbleNode.nodeId)) {
+            highlightNode(bubbleNode.nodeId, "rgba(0, 0, 255, 0.8");
+          } else {
+            hideNode(bubbleNode.nodeId);
+          }
         }
       }
     });
@@ -3501,36 +3503,6 @@ export function Bluefish(props: BluefishProps) {
                   r={3}
                   fill={getCursorColor()}
                 />
-              )}
-
-            {isAMAutoType(props.mantisComponentType) &&
-              isAutoMapContext(mantisContext) && (
-                <>
-                  <rect
-                    x={gsapCenterX() - gsapWidth() / 2}
-                    y={gsapCenterY() - gsapHeight() / 2}
-                    width={gsapWidth()}
-                    height={gsapHeight() / 16 + gsapHeight() / 32}
-                    fill="white"
-                    opacity={0.8}
-                    stroke-width={2 / gsapMagnificationFactor()}
-                  />
-                  <text
-                    x={gsapCenterX() - gsapWidth() / 2 + gsapWidth() / 32}
-                    y={
-                      gsapCenterY() -
-                      gsapHeight() / 2 +
-                      gsapHeight() / 32 +
-                      32 / gsapMagnificationFactor()
-                    }
-                    fill="black"
-                    font-weight={600}
-                    font-size={`${48 / gsapMagnificationFactor()}`}
-                    font-family="'Comic Sans MS', 'Comic Sans', cursive"
-                  >
-                    {`${mantisContext.allViewBoxes().length - 1} Related Elements`}
-                  </text>
-                </>
               )}
           </>
         )}

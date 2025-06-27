@@ -41,8 +41,13 @@ export enum MantisComponentType {
 export enum MantisTraversalPattern {
   Bubble,
   Cursor,
-  Joystick,
+  EdgePan,
 }
+/**
+ * While salient nodes and node relations are hardcoded, this enum is used to
+ * differentiate between the different types of diagrams that can be traversed
+ * using Mantis.
+ */
 export type MantisDiagram =
   | "Planets"
   | "Python-Tutor"
@@ -85,6 +90,10 @@ export function isAMTraversalType(type: MantisComponentType | undefined) {
     type === MantisComponentType.AMCircuitTraversal
   );
 }
+/**
+ * @returns true if the component of type `type` is the main component of the
+ * Docked Lens functionality.
+ */
 export function isDLMainType(type: MantisComponentType | undefined) {
   return (
     type === MantisComponentType.DLMain ||
@@ -123,6 +132,9 @@ export function isTraversalType(type: MantisComponentType | undefined) {
     isPreviewType(type)
   );
 }
+/**
+ * @returns true if the component of type `type` is a draggable component.
+ */
 export function isDraggableType(type: MantisComponentType | undefined) {
   return (
     type === MantisComponentType.MMMiniMap || type === MantisComponentType.LLens
@@ -140,6 +152,10 @@ export function isDiagramSpecificType(type: MantisComponentType | undefined) {
   );
 }
 
+// Context Checks
+// Every component has a context that is used to store state related to the
+// component. These functions are used to differentiate between different types
+// of contexts.
 export function isMiniMapContext(context: MantisState | undefined) {
   return context?.type === "MM";
 }
@@ -157,23 +173,47 @@ export function isDockedLensContext(context: MantisState | undefined) {
 }
 
 export type LLensInfo = { x: number; y: number; magnification: number };
+/**
+ * The type of information stored in the context for each state:
+ *
+ * MM - Mini Map
+ *
+ * SS - Split Screen
+ *
+ * L - Multi Lens
+ *
+ * P - Preview
+ *
+ * B - Basic
+ *
+ * AM - Auto Map
+ *
+ * DL - Docked Lens
+ */
 export type MantisState =
   | {
       type: "MM";
+      /** Viewbox of the MMMain component. */
       viewBBox: Accessor<string>;
+      /** Setter for `viewBBox` */
       setViewBBox: Setter<string>;
+      /** True if the user is dragging the red rectangle in the MMMiniMap component. */
       isDragging: Accessor<boolean>;
+      /** Setter for `isDragging` */
       setIsDragging: Setter<boolean>;
     }
   | {
       type: "SS";
+      /** Viewbox of the SSLeft component. */
       leftViewBBox: Accessor<string>;
       setLeftViewBBox: Setter<string>;
+      /** Viewbox of the SSRight component. */
       rightViewBBox: Accessor<string>;
       setRightViewBBox: Setter<string>;
     }
   | {
       type: "L";
+      /** A list of all the lenses (LLens components) on the diagram (LMain component) */
       lensInfo: Accessor<LLensInfo[]>;
       updateLensInfo: Setter<LLensInfo[]>;
     }
@@ -181,27 +221,40 @@ export type MantisState =
   | { type: "B" }
   | {
       type: "AM";
+      /** Center of the selected node. (i.e. the one that the automatic component is centered around) */
       selNodeCenter: Accessor<{ x: number; y: number }>;
       setSelNodeCenter: Setter<{ x: number; y: number }>;
+      /** Zoom level of the automatic component. */
       zoomLevel: Accessor<number>;
       setZoomLevel: Setter<number>;
+      /** The viewbox of the main/traversal/non-automatic component. */
       mainViewBox: Accessor<string>;
       setMainViewBox: Setter<string>;
+      /** True if the automatic component is zoomed in on a node. False if it's zoomed out to show all related nodes. */
       isAutoZoomed: Accessor<boolean>;
       setIsAutoZoomed: Setter<boolean>;
+      /** A list of the viewboxes for each of the related nodes. */
       allViewBoxes: Accessor<string[]>;
       setAllViewBoxes: Setter<string[]>;
     }
   | {
       type: "DL";
+      /** The location of the mouse on the DLMain component. */
       mouseCenter: Accessor<{ x: number; y: number }>;
       setMouseCenter: Setter<{ x: number; y: number }>;
+      /** The zoom level of the docked lens. */
       dockedLensZoom: Accessor<number>;
       setDockedLensZoom: Setter<number>;
     };
 
 const MantisContext = createContext<MantisState>();
 
+/**
+ * Create a context for a Mantis component.
+ *
+ * @param props The props for the MantisProvider component.
+ * @param props.providerType The type of context to create.
+ */
 export const MantisProvider = (
   props: ParentProps & {
     providerType: "MM" | "SS" | "L" | "P" | "B" | "AM" | "DL";

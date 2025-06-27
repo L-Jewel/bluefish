@@ -59,6 +59,21 @@ import {
   useMantisProvider,
 } from "./mantis";
 
+/**
+ * Global constants that can be overridden by the user.
+ *
+ * `cursorEpsilon` - Determines how much the cursor has to move before the screen updates when using the Cursor traversal pattern. [DEFAULT 3]
+ *
+ * `traditionalEpsilon` - Determines how much the cursor has to move before the screen updates when using the EdgePan traversal pattern. [DEFAULT 80]
+ *
+ * `scrollDelta` - Determines how much a scroll event changes the zoom level. [DEFAULT 0.2]
+ *
+ * `zoomLevel` - If the Mantis component is a Traversal Type, this property determines its zoom level whenever this property is set.
+ *
+ * `gsapDuration` - The duration of the GSAP animations used in the Mantis component. [DEFAULT 1 (0.75 when using the Bubble traversal pattern)]
+ *
+ * `arrowSize` - The size of the arrows used in the Mantis component. [DEFAULT 12]
+ */
 export type MantisOverrides = {
   cursorEpsilon?: number;
   traditionalEpsilon?: number;
@@ -108,6 +123,8 @@ type NodeInfo = {
 
 /**
  * Preview/Enemy Indicator + Auto Map Prototype Only.
+ *
+ * NOTE: This function is currently hardcoded.
  * @returns A map that maps a node to a list of nodes related to it.
  */
 const getNodeRelations = (
@@ -472,9 +489,11 @@ const getNodeRelations = (
 };
 /**
  * Preview/Enemy Indicator + Auto Map Prototype Only.
+ *
+ * NOTE: This function is currently hardcoded.
  * @returns a list of the salient nodes in the given diagram
  */
-const getPreviewNodes = (
+const getSalientNodes = (
   type: MantisComponentType | undefined
 ): Set<string> => {
   switch (type) {
@@ -604,6 +623,8 @@ const getPreviewNodes = (
 };
 /**
  * Preview/Enemy Indicator + Auto Map Prototype Only.
+ *
+ * NOTE: This function is currently hardcoded.
  * @returns a list of the salient nodes (excluding arrows/connectors) in the given diagram
  */
 const getIndicatorNodes = (
@@ -778,21 +799,25 @@ export function Bluefish(props: BluefishProps) {
     uid: createUniqueId(),
   });
 
-  // SCREEN MAGNIFICATION TRAVERSAL PROTOTYPING
+  // MANTIS PROTOTYPING
   let svgRef: SVGSVGElement | undefined;
   const showHighlighting = () => props.showHighlighting ?? false;
   const mantisContext = useMantisProvider();
+
+  // A list of every visible Bluefish node in the scenegraph.
   const [bubbleNodeData, setBubbleNodeData] = createSignal<NodeInfo[]>([]);
-  const [previewNodeData, setPreviewNodeData] = createSignal<NodeInfo[]>([]);
-  const previewNodeInfo = new Map<string, NodeInfo>();
-  /**
-   * scopeName <=> nodeId
-   */
+  // A list of all of the Bluefish nodes that are also in the list returned from `getSalientNodes`.
+  const [salientNodeData, setSalientNodeData] = createSignal<NodeInfo[]>([]);
+  /** Maps the ID of a node to its NodeInfo. */
+  const salientNodeInfo = new Map<string, NodeInfo>();
+  /** scope name <=> node id */
   const scopeMap = new BiMap<string, string>();
+
   const nodeRelations = () => getNodeRelations(props.mantisComponentType);
-  const previewNodes = () => getPreviewNodes(props.mantisComponentType);
+  const salientNodes = () => getSalientNodes(props.mantisComponentType);
   const indicatorNodes = () =>
     new Set(getIndicatorNodes(props.mantisComponentType));
+
   // Helper functions
   /**
    * @param nodeId a string that corresponds to the ID of a node in the scenegraph
@@ -1211,15 +1236,16 @@ export function Bluefish(props: BluefishProps) {
     return Array.from(siblings);
   }
 
-  // Calculate the midpoint of each node (Traversal Components Only)
+  // Calculate the midpoint of each node in the Bluefish diagram (Traversal Components Only)
   createEffect(() => {
     if (
       isPreviewType(props.mantisComponentType) ||
       isAMTraversalType(props.mantisComponentType) ||
       isDLMainType(props.mantisComponentType)
     ) {
+      // For the components that utilize the hardcoded list of salient nodes, also create a separate list with just the midpoints of those salient nodes.
       const newBubbleMidpoints: NodeInfo[] = [];
-      const newPreviewMidpoints: NodeInfo[] = [];
+      const newSalientMidpoints: NodeInfo[] = [];
       /**
        * Sometimes, the name of the node contains a changing ID. With this
        * function, we can just use the part of the name that doesn't change
@@ -1237,12 +1263,12 @@ export function Bluefish(props: BluefishProps) {
         return undefined;
       };
 
-      for (const iNode of previewNodes()) {
+      for (const iNode of salientNodes()) {
         const iNodeActual = findKeyInScope(iNode);
         if (!iNodeActual) continue;
         scopeMap.set(iNode, scope[iNodeActual].layoutNode ?? "");
       }
-      const previewNodeIds = new Set(scopeMap.getValues());
+      const salientNodeIds = new Set(scopeMap.getValues());
 
       for (const nodeId in scenegraph) {
         if (getNodeType(nodeId) === "Ref") continue;
@@ -1260,18 +1286,19 @@ export function Bluefish(props: BluefishProps) {
           height: nodeBbox.height ?? 0,
         };
         newBubbleMidpoints.push(newNodeInfo);
-        if (previewNodeIds.has(nodeId)) {
-          newPreviewMidpoints.push(newNodeInfo);
-          previewNodeInfo.set(nodeId, newNodeInfo);
+        if (salientNodeIds.has(nodeId)) {
+          newSalientMidpoints.push(newNodeInfo);
+          salientNodeInfo.set(nodeId, newNodeInfo);
         }
       }
 
       setBubbleNodeData(newBubbleMidpoints);
-      setPreviewNodeData(newPreviewMidpoints);
+      setSalientNodeData(newSalientMidpoints);
     } else if (
       isTraversalType(props.mantisComponentType) ||
       props.mantisComponentType === MantisComponentType.LLens
     ) {
+      // For the components that don't utilize the hardcoded list of salient nodes, create only one list of midpoints.
       const newMidpoints = [];
 
       for (const nodeId in scenegraph) {
@@ -1304,26 +1331,26 @@ export function Bluefish(props: BluefishProps) {
     }
   });
 
-  // Information about the currently selected node
+  // Information about the currently selected node. Both the closest visible Bluefish node (referred to as Bubble) and the closest salient node (referred to as Salient).
   const [currentNodeBubbleIndex, setCurrentNodeBubbleIndex] = createSignal(-1);
-  const [currentNodePreviewIndex, setCurrentNodePreviewIndex] =
+  const [currentNodeSalientIndex, setCurrentNodeSalientIndex] =
     createSignal(-1);
   const [currentNodeId, setCurrentNodeId] = createSignal<string>(id);
-  const [previewNodeId, setPreviewNodeId] = createSignal<string>(id);
+  const [salientNodeId, setSalientNodeId] = createSignal<string>(id);
   const currentNode = () =>
     scenegraphSignal().scenegraph[currentNodeId()] as BluefishNodeType;
-  const previewNode = () =>
-    scenegraphSignal().scenegraph[previewNodeId()] as BluefishNodeType;
+  const salientNode = () =>
+    scenegraphSignal().scenegraph[salientNodeId()] as BluefishNodeType;
   const currentTransform = () => calculateTransform(currentNodeId());
-  const previewTransform = () => calculateTransform(previewNodeId());
+  const salientTransform = () => calculateTransform(salientNodeId());
   const currentBboxInfo = () => {
     return currentNodeId()
       ? getBbox(currentNodeId())
       : { left: 0, top: 0, width: 0, height: 0 };
   };
-  const previewBboxInfo = () => {
-    return previewNodeId()
-      ? getBbox(previewNodeId())
+  const salientBboxInfo = () => {
+    return salientNodeId()
+      ? getBbox(salientNodeId())
       : { left: 0, top: 0, width: 0, height: 0 };
   };
 
@@ -1378,15 +1405,20 @@ export function Bluefish(props: BluefishProps) {
     children: JSX.Element;
   }) => {
     // "GLOBAL" CONSTANTS
+    /** The duration of the GSAP animations used in the Mantis component. [DEFAULT 1 (0.75 when using the Bubble traversal pattern)] */
     const GSAP_DURATION = () =>
       props.parameterOverrides?.gsapDuration ??
       (props.mantisTraversalPattern === MantisTraversalPattern.Bubble
         ? 0.75
         : 1);
+    /** Determines how much a scroll event changes the zoom level. [DEFAULT 0.2] */
     const SCROLL_DELTA = () => props.parameterOverrides?.scrollDelta ?? 0.2;
+    /** Determines how much the cursor has to move before the screen updates when using the Cursor traversal pattern. [DEFAULT 3] */
     const CURSOR_EPSILON = () => props.parameterOverrides?.cursorEpsilon ?? 3;
+    /** Determines how much the cursor has to move before the screen updates when using the EdgePan traversal pattern. [DEFAULT 80] */
     const TRADITIONAL_EPSILON = () =>
       (props.parameterOverrides?.traditionalEpsilon ?? 0.8) * 100;
+    /** The size of the arrows used in the Mantis component. [DEFAULT 12] */
     const ARROW_SIZE = () => props.parameterOverrides?.arrowSize ?? 12;
     const MAGNIFICATION_DEFAULT = 2;
 
@@ -1403,6 +1435,7 @@ export function Bluefish(props: BluefishProps) {
       (props.positioning === "absolute" ? 0 : (paintProps.bbox.top ?? 0));
     const defaultViewBox = () => `${minX()} ${minY()} ${width()} ${height()}`;
 
+    // The width/height/minX/minY calculated above are the parameters of the diagram alone. Unlike Bluefish SVGs, Mantis SVGs stretch to fit the size of their container. The values below are the actual width/height/minX/minY of the SVG element in the DOM. (Calculations in SVG, not client coordinates.)
     const [actualWidth, setActualWidth] = createSignal(0);
     const [actualHeight, setActualHeight] = createSignal(0);
     const [actualMinX, setActualMinX] = createSignal(0);
@@ -1490,6 +1523,12 @@ export function Bluefish(props: BluefishProps) {
       setMagnificationCenterX(newCenterX);
       setMagnificationCenterY(newCenterY);
     }
+    /**
+     * Detects whether a mouse or touch is over the SVG element.
+     *
+     * If true, the `elementActive` signal is set to true.
+     * If false, the `elementActive` signal is set to false.
+     */
     function detectElementActive(event: MouseEvent | TouchEvent): void {
       let elementUnderMouse;
       if (event instanceof MouseEvent) {
@@ -1525,18 +1564,18 @@ export function Bluefish(props: BluefishProps) {
     const selNodeHeight = () => currentBboxInfo()?.height ?? 0;
     const selNodeCenterX = () => selNodeX() + selNodeWidth() / 2;
     const selNodeCenterY = () => selNodeY() + selNodeHeight() / 2;
-    // Preview Node BBox Information
-    const prevNodeX = () =>
-      (previewBboxInfo()?.left ?? 0) + (previewTransform()?.x ?? 0);
-    const prevNodeY = () =>
-      (previewBboxInfo()?.top ?? 0) + (previewTransform()?.y ?? 0);
-    const prevNodeWidth = () => previewBboxInfo()?.width ?? 0;
-    const prevNodeHeight = () => previewBboxInfo()?.height ?? 0;
-    const prevNodeCenterX = () => prevNodeX() + prevNodeWidth() / 2;
-    const prevNodeCenterY = () => prevNodeY() + prevNodeHeight() / 2;
-
+    // Salient Node BBox Information
+    const salientNodeX = () =>
+      (salientBboxInfo()?.left ?? 0) + (salientTransform()?.x ?? 0);
+    const salientNodeY = () =>
+      (salientBboxInfo()?.top ?? 0) + (salientTransform()?.y ?? 0);
+    const salientNodeWidth = () => salientBboxInfo()?.width ?? 0;
+    const salientNodeHeight = () => salientBboxInfo()?.height ?? 0;
+    const salientNodeCenterX = () => salientNodeX() + salientNodeWidth() / 2;
+    const salientNodeCenterY = () => salientNodeY() + salientNodeHeight() / 2;
+    /** A list of the nodes related to the closest salient node. */
     const relatedNodes = () =>
-      nodeRelations().get(scopeMap.getKey(previewNodeId()) ?? "") ?? [];
+      nodeRelations().get(scopeMap.getKey(salientNodeId()) ?? "") ?? [];
 
     // Red Box Information
     // Honestly just a misc signal used for different things in each component.
@@ -1584,6 +1623,9 @@ export function Bluefish(props: BluefishProps) {
     const gsapMagnificationFactor = createMemo(
       () => actualHeight() / gsapHeight()
     );
+    /**
+     * A callback to update the GSAP center and width/height based on the current viewBox.
+     */
     const updateGSAPCenter = () => {
       if (svgRef) {
         const viewBox = svgRef.getAttribute("viewBox")?.split(" ");
@@ -1602,9 +1644,9 @@ export function Bluefish(props: BluefishProps) {
         (d) => d.cx,
         (d) => d.cy
       );
-    const previewDelaunay = () =>
+    const salientDelaunay = () =>
       d3.Delaunay.from(
-        previewNodeData(),
+        salientNodeData(),
         (d) => d.cx,
         (d) => d.cy
       );
@@ -1615,8 +1657,8 @@ export function Bluefish(props: BluefishProps) {
         minX() + width(),
         minY() + height(),
       ]);
-    const previewVoronoi = () =>
-      previewDelaunay().voronoi([
+    const salientVoronoi = () =>
+      salientDelaunay().voronoi([
         minX(),
         minY(),
         minX() + width(),
@@ -1626,6 +1668,12 @@ export function Bluefish(props: BluefishProps) {
     // VISUAL LOGIC
     // Handles zoom-related functionalities
     const [isZoomed, setIsZoomed] = createSignal(false);
+    /**
+     * Toggles between zooming in and out of the SVG.
+     *
+     * If the SVG is zoomed in, it resets the viewBox to the default viewBox.
+     * If the SVG is zoomed out, it sets the viewBox to the magnificationViewBox.
+     */
     function zoomInNode() {
       if (svgRef && elementActive()) {
         if (isZoomed()) {
@@ -1642,20 +1690,23 @@ export function Bluefish(props: BluefishProps) {
         setIsZoomed(!isZoomed());
       }
     }
-    function zoomToNode(e: Event) {
+    /**
+     * Zooms the SVG to the currently selected node.
+     */
+    function zoomToNode(e: Event): void {
       if (svgRef && elementActive()) {
         e.preventDefault();
         const newCenterX = isDiagramSpecificType(props.mantisComponentType)
-          ? prevNodeCenterX()
+          ? salientNodeCenterX()
           : selNodeCenterX();
         const newCenterY = isDiagramSpecificType(props.mantisComponentType)
-          ? prevNodeCenterY()
+          ? salientNodeCenterY()
           : selNodeCenterY();
         const newWidth = isDiagramSpecificType(props.mantisComponentType)
-          ? prevNodeWidth()
+          ? salientNodeWidth()
           : selNodeWidth();
         const newHeight = isDiagramSpecificType(props.mantisComponentType)
-          ? prevNodeHeight()
+          ? salientNodeHeight()
           : selNodeHeight();
 
         if (
@@ -1682,6 +1733,11 @@ export function Bluefish(props: BluefishProps) {
         setIsZoomed(true);
       }
     }
+    /**
+     * Handles the scroll event for zooming in and out of the SVG.
+     *
+     * If the mouse is over the SVG, it prevents the default scroll behavior and adjusts the zoom of the active element.
+     */
     function handleScroll(event: WheelEvent) {
       // First check if the mouse is in the SVG
       const elementUnderMouse = document.elementFromPoint(
@@ -1737,7 +1793,7 @@ export function Bluefish(props: BluefishProps) {
         }
       }
     }
-    // Makes the mini-map rectangle draggable
+    // MINI-MAP: Makes the mini-map rectangle draggable
     const [dragStartX, setDragStartX] = createSignal(0);
     const [dragStartY, setDragStartY] = createSignal(0);
     const [isDragging, setIsDragging] = createSignal(false);
@@ -1859,7 +1915,7 @@ export function Bluefish(props: BluefishProps) {
     }
 
     /**
-     * For the multi-lens component, add a lens centered around the mouse location.
+     * MULTI-LENS: Add a lens centered around the mouse location.
      */
     function addLens(event: MouseEvent) {
       const mousePos = getMousePositionSVG({
@@ -1879,7 +1935,7 @@ export function Bluefish(props: BluefishProps) {
       }
     }
     /**
-     * For the multi-lens component, delete the lens that is currently being hovered over.
+     * MULTI-LENS: Delete the lens that is currently being hovered over.
      */
     function deleteLens(event: MouseEvent) {
       if (isMultiLensContext(mantisContext) && elementActive()) {
@@ -1890,7 +1946,7 @@ export function Bluefish(props: BluefishProps) {
       }
     }
 
-    // GSAP Logic (Mini-Map Main + Traversal Components)
+    // GSAP Logic -- Traversal Components Only
     createEffect(() => {
       if (svgRef) {
         if (
@@ -1902,6 +1958,7 @@ export function Bluefish(props: BluefishProps) {
               attr: { viewBox: magnificationViewBox() },
               duration: mantisContext.isDragging() ? 0.5 : GSAP_DURATION(),
             });
+            // Ensures that the mini-map is updated while the user navigates.
             mantisContext.setViewBBox(magnificationViewBox());
           } else {
             mantisContext.setViewBBox(defaultViewBox());
@@ -1952,8 +2009,6 @@ export function Bluefish(props: BluefishProps) {
     let prevPinchDiff = -1; // The previous distance between two fingers
     /**
      * Handles the "keydown" event.
-     * When the 'f' key is pressed, toggle whether or not the mouse is frozen on the
-     * main SVG.
      */
     function handleKeyPress(event: KeyboardEvent) {
       if (
@@ -1961,7 +2016,9 @@ export function Bluefish(props: BluefishProps) {
           isDLMainType(props.mantisComponentType)) &&
         elementActive()
       ) {
+        // F: toggle whether or not the mouse is frozen on the main SVG.
         if (event.key === "f") setMouseActive(!mouseActive());
+        // Shift + Up: zoom in by 1.
         else if (event.shiftKey && event.key === "ArrowUp") {
           event.preventDefault();
           if (isDockedLensContext(mantisContext)) {
@@ -1969,6 +2026,7 @@ export function Bluefish(props: BluefishProps) {
           } else if (isZoomed()) {
             setMagnificationFactor((prev) => Math.floor(prev) + 1);
           }
+          // Shift + Down: zoom out by 1.
         } else if (event.shiftKey && event.key === "ArrowDown") {
           event.preventDefault();
           if (isDockedLensContext(mantisContext)) {
@@ -2020,9 +2078,9 @@ export function Bluefish(props: BluefishProps) {
               const targetNodeCenter = mantisContext.selNodeCenter();
               setMagnificationCenterX(targetNodeCenter.x);
               setMagnificationCenterY(targetNodeCenter.y);
-              setPreviewNodeId(
-                previewNodeData()[
-                  previewDelaunay().find(targetNodeCenter.x, targetNodeCenter.y)
+              setSalientNodeId(
+                salientNodeData()[
+                  salientDelaunay().find(targetNodeCenter.x, targetNodeCenter.y)
                 ].nodeId
               );
               setAutoMapIndex(0);
@@ -2043,6 +2101,7 @@ export function Bluefish(props: BluefishProps) {
         else if (event.key === "r") setLensShape("rectangle");
       }
     }
+    // Adds (and cleans up) event listeners for the SVG element.
     createEffect(() => {
       if (svgRef) {
         document.addEventListener("keydown", handleKeyPress);
@@ -2182,13 +2241,13 @@ export function Bluefish(props: BluefishProps) {
       if (isTraversalType(props.mantisComponentType)) {
         // Finds the node closest to the cursor.
         const closestPointBubble = bubbleDelaunay().find(mouseX(), mouseY());
-        const closestPointImportant = previewDelaunay().find(
+        const closestPointImportant = salientDelaunay().find(
           mouseX(),
           mouseY()
         );
         if (isNaN(closestPointBubble)) return;
         setCurrentNodeBubbleIndex(closestPointBubble);
-        setCurrentNodePreviewIndex((prevVal) => {
+        setCurrentNodeSalientIndex((prevVal) => {
           const newVal = isNaN(closestPointImportant)
             ? -1
             : closestPointImportant;
@@ -2200,8 +2259,8 @@ export function Bluefish(props: BluefishProps) {
           resolveNode(bubbleNodeData()[closestPointBubble].nodeId)
         );
         if (!isNaN(closestPointImportant))
-          setPreviewNodeId(
-            resolveNode(previewNodeData()[closestPointImportant].nodeId)
+          setSalientNodeId(
+            resolveNode(salientNodeData()[closestPointImportant].nodeId)
           );
 
         if (props.mantisTraversalPattern === MantisTraversalPattern.Bubble) {
@@ -2214,7 +2273,7 @@ export function Bluefish(props: BluefishProps) {
           setRectHeight(selNodeHeight());
           setRectWidth(selNodeWidth());
         } else if (
-          props.mantisTraversalPattern === MantisTraversalPattern.Joystick
+          props.mantisTraversalPattern === MantisTraversalPattern.EdgePan
         ) {
           // Mirrors the traditional behavior of screen magnifiers. In other words, it allows
           // the user to move their mouse around, but only moves the screen around when the mouse
@@ -2279,7 +2338,7 @@ export function Bluefish(props: BluefishProps) {
             return Math.max(minY(), Math.min(newY, minY() + height()));
           });
         }
-        // SPLIT SCREEN - Put this component's view box into the global context.
+        // SPLIT-SCREEN: Put this component's view box into the global context.
         if (isSplitScreenContext(mantisContext)) {
           if (props.mantisComponentType === MantisComponentType.SSLeft) {
             mantisContext.setLeftViewBBox(
@@ -2329,7 +2388,7 @@ export function Bluefish(props: BluefishProps) {
         .filter((node) => indicatorNodes().has(node))
         .map((node) => scopeMap.getValue(node))
         .filter((nodeId) => nodeId !== undefined);
-      return [previewNodeId(), ...relatedNodeIds];
+      return [salientNodeId(), ...relatedNodeIds];
     };
     // Auto-Map Helper Functions
     /**
@@ -2402,7 +2461,7 @@ export function Bluefish(props: BluefishProps) {
           // The traversal component keeps track of which node is currently selected to be viewed
           // by the auto component. Right now, the user just uses 'a' and 'd' to cycle through the nodes.
           // TODO - Maybe we can be more helpful in this cycling process?
-          const autoMapNode = previewNodeInfo.get(
+          const autoMapNode = salientNodeInfo.get(
             autoMapContent()[autoMapIndex() ?? 0]
           );
           if (!autoMapNode) return;
@@ -2412,7 +2471,7 @@ export function Bluefish(props: BluefishProps) {
           });
           // At the moment, the zoom matches the traversal component.
           mantisContext.setZoomLevel(
-            autoMapNode.nodeId === previewNodeId()
+            autoMapNode.nodeId === salientNodeId()
               ? Math.max(1, magnificationFactor() - 1)
               : Math.min(
                   calculateMaxZoomLevel(autoMapNode.nodeId),
@@ -2441,6 +2500,7 @@ export function Bluefish(props: BluefishProps) {
             setMagnificationCenterX(mantisContext.selNodeCenter().x);
             setMagnificationCenterY(mantisContext.selNodeCenter().y);
           } else {
+            // If the user is not auto-zoomed, then we zoom out to see all of the related nodes.
             const allVBBBox = computeBBoxUnion(
               mantisContext.allViewBoxes().map((viewBox) => {
                 const [left, top, width, height] = viewBox
@@ -2463,7 +2523,10 @@ export function Bluefish(props: BluefishProps) {
     });
 
     // DOCKED LENS LOGIC
-    function updateMouseCenter() {
+    /**
+     * Updates the signals `mouseX` and `mouseY` based on the current mouse position.
+     */
+    function updateMouseCenter(): void {
       const newMouseCoords = getMousePositionSVG({
         x: clientX(),
         y: clientY(),
@@ -2476,19 +2539,19 @@ export function Bluefish(props: BluefishProps) {
       if (isDockedLensContext(mantisContext)) {
         if (isDLMainType(props.mantisComponentType) && svgRef) {
           if (props.mantisComponentType !== MantisComponentType.DLMain) {
-            // Finds the preview node closest to the cursor.
-            const closestPointPreview = previewDelaunay().find(
+            // Finds the salient node closest to the cursor.
+            const closestPointSalient = salientDelaunay().find(
               mouseX(),
               mouseY()
             );
-            if (isNaN(closestPointPreview)) return;
-            setPreviewNodeId(
-              resolveNode(previewNodeData()[closestPointPreview].nodeId)
+            if (isNaN(closestPointSalient)) return;
+            setSalientNodeId(
+              resolveNode(salientNodeData()[closestPointSalient].nodeId)
             );
 
             mantisContext.setMouseCenter({
-              x: prevNodeCenterX(),
-              y: prevNodeCenterY(),
+              x: salientNodeCenterX(),
+              y: salientNodeCenterY(),
             });
           } else if (
             props.mantisTraversalPattern === MantisTraversalPattern.Bubble
@@ -2538,7 +2601,7 @@ export function Bluefish(props: BluefishProps) {
       }
     });
 
-    // Highlighting?
+    // Dynamic Highlighting (Drop Shadow)
     function hideNode(nodeId: string) {
       if (svgRef) {
         const element =
@@ -2573,7 +2636,7 @@ export function Bluefish(props: BluefishProps) {
               isPreviewType(props.mantisComponentType) ||
                 isAMTraversalType(props.mantisComponentType) ||
                 isDLMainType(props.mantisComponentType)
-                ? previewNodeId()
+                ? salientNodeId()
                 : currentNodeId()
             ) ?? ""
           ) ?? []
@@ -2581,8 +2644,8 @@ export function Bluefish(props: BluefishProps) {
       );
     createEffect(() => {
       if (showHighlighting()) {
-        for (const bubbleNode of previewNodeData()) {
-          if (previewNodeId() === bubbleNode.nodeId) {
+        for (const bubbleNode of salientNodeData()) {
+          if (salientNodeId() === bubbleNode.nodeId) {
             highlightNode(bubbleNode.nodeId);
           } else if (relatedNodesToHighlight().has(bubbleNode.nodeId)) {
             highlightNode(bubbleNode.nodeId, "rgba(0, 0, 255, 0.8");
@@ -2594,6 +2657,19 @@ export function Bluefish(props: BluefishProps) {
     });
 
     // HELPER FUNCTIONS
+    /**
+     * An arrow that points to a target point outside the current view box.
+     *
+     * @param props - The properties for the OffScreenArrow component.
+     * @param props.targetPoint - The point where the arrow should point to.
+     * @param props.arrowheadColor - The color of the arrowhead.
+     * @param props.arrowType - The type of arrow to render (i.e. whether or not it has a notch).
+     * @param props.nodeId - The ID of the node to which the arrow points.
+     * @param props.onClick - A callback function to execute when the arrow is clicked.
+     * @param props.straightenArrow - If true, the arrow will be perpendicular to an edge of the screen. (Unless the arrow is pointing to a corner of the screen. Then, the arrow will be at an angle.)
+     * @param props.hideIcon - If true, the icon will not be displayed.
+     * @returns an SVG arrow element that points to the target point.
+     */
     const OffScreenArrow = (props: {
       targetPoint: Point;
       arrowheadColor?: string;
@@ -2637,7 +2713,7 @@ export function Bluefish(props: BluefishProps) {
         if (svgRef && props.nodeId) {
           const currNodeType = getNodeType(props.nodeId);
           if (currNodeType === "Text") {
-            const node = previewNodeInfo.get(props.nodeId);
+            const node = salientNodeInfo.get(props.nodeId);
             if (node) {
               const textLabel = svgRef.querySelector(
                 `[name="${props.nodeId}"]`
@@ -2648,7 +2724,7 @@ export function Bluefish(props: BluefishProps) {
               }
             }
           } else if (currNodeType === "Circle") {
-            const node = previewNodeInfo.get(props.nodeId);
+            const node = salientNodeInfo.get(props.nodeId);
             if (node) {
               const circleNode = svgRef.querySelector(
                 `[name="${props.nodeId}"]`
@@ -2659,7 +2735,7 @@ export function Bluefish(props: BluefishProps) {
               }
             }
           } else {
-            const node = previewNodeInfo.get(props.nodeId);
+            const node = salientNodeInfo.get(props.nodeId);
             if (node) {
               const findAndCloneNode = (selector: string) => {
                 const element = svgRef.querySelector(selector);
@@ -3020,6 +3096,15 @@ export function Bluefish(props: BluefishProps) {
         </Switch>
       );
     };
+    /**
+     * A rectangle that highlights the view box of a given view box string.
+     *
+     * @param props - The properties for the ViewBoxRect component.
+     * @param props.viewBox - a view box string
+     * @param props.stroke - the stroke color of the rectangle.
+     * @param props.strokeWidth - the stroke width of the rectangle.
+     * @returns an SVG rectangle. If that rectangle is not in view, an arrow will point to it.
+     */
     const ViewBoxRect = (props: {
       viewBox: string | undefined;
       stroke?: string;
@@ -3063,6 +3148,16 @@ export function Bluefish(props: BluefishProps) {
         </>
       );
     };
+    /**
+     * MULTI-LENS: An SVG element that represents a lens.
+     *
+     * @param props - The properties for the LensClipPath component.
+     * @param props.id - The ID of the lens.
+     * @param props.lensInfo - The information about the lens, including its position and magnification.
+     * @param props.snap - If true, the lens will snap to the nearest node when not being dragged.
+     * @param props.shape - The shape of the lens, either "circle" or "rectangle".
+     * @returns an SVG element that represents a lens.
+     */
     const LensClipPath = (
       props: ParentProps & {
         id: number;
@@ -3213,6 +3308,7 @@ export function Bluefish(props: BluefishProps) {
       >
         {props.mantisComponentType === MantisComponentType.LLens ? (
           <>
+            {/* Multi-Lens: Lens Element */}
             {isMultiLensContext(mantisContext) &&
               props.mantisId !== undefined && (
                 <LensClipPath
@@ -3242,7 +3338,7 @@ export function Bluefish(props: BluefishProps) {
                     <For
                       each={
                         isDiagramSpecificType(props.mantisComponentType)
-                          ? Array.from(previewVoronoi().cellPolygons())
+                          ? Array.from(salientVoronoi().cellPolygons())
                           : Array.from(bubbleVoronoi().cellPolygons())
                       }
                     >
@@ -3268,10 +3364,10 @@ export function Bluefish(props: BluefishProps) {
                         stroke="green"
                         fill="none"
                         stroke-width={2}
-                        x={prevNodeX()}
-                        y={prevNodeY()}
-                        width={prevNodeWidth()}
-                        height={prevNodeHeight()}
+                        x={salientNodeX()}
+                        y={salientNodeY()}
+                        width={salientNodeWidth()}
+                        height={salientNodeHeight()}
                         style={{
                           filter: `blur(.1rem)`,
                         }}
@@ -3301,7 +3397,7 @@ export function Bluefish(props: BluefishProps) {
                                     props.mantisComponentType
                                   ) ||
                                   isDLMainType(props.mantisComponentType)
-                                  ? previewNodeId()
+                                  ? salientNodeId()
                                   : currentNodeId()
                               ) ?? ""
                             )
@@ -3343,7 +3439,7 @@ export function Bluefish(props: BluefishProps) {
                   <Show when={isPreviewType(props.mantisComponentType)}>
                     <For
                       each={Array.from(
-                        previewVoronoi().neighbors(currentNodePreviewIndex())
+                        salientVoronoi().neighbors(currentNodeSalientIndex())
                       )}
                     >
                       {(neighborIndex) => {
@@ -3351,7 +3447,7 @@ export function Bluefish(props: BluefishProps) {
                         if (neighborIndex === undefined || neighborIndex < 0)
                           return;
                         const neighborNodeMidpoint = () =>
-                          previewNodeData()[neighborIndex];
+                          salientNodeData()[neighborIndex];
                         const neighborNodeId = neighborNodeMidpoint().nodeId;
                         // Determine whether or not to show the arrow.
                         const neighborBbox = getBbox(neighborNodeId);
